@@ -2602,6 +2602,96 @@ public class Socket: SocketReader, SocketWriter {
 
 		return returnCount
 	}
+    
+    public func readImage(into buffer: inout Data, bufSize: Int, truncate: Bool = false) throws -> Int {
+        
+        // Make sure the buffer is valid...
+        if bufSize == 0 {
+            
+            throw Error(code: Socket.SOCKET_ERR_INVALID_BUFFER, reason: nil)
+        }
+        
+        // The socket must've been created and must be connected...
+        if self.socketfd == Socket.SOCKET_INVALID_DESCRIPTOR {
+            
+            throw Error(code: Socket.SOCKET_ERR_BAD_DESCRIPTOR, reason: nil)
+        }
+        
+        if !self.isConnected {
+            
+            throw Error(code: Socket.SOCKET_ERR_NOT_CONNECTED, reason: nil)
+        }
+        
+        // See if we have cached data to send back...
+        if self.readStorage.length > 0 {
+            
+            if bufSize < self.readStorage.length {
+                
+                if truncate {
+                    buffer.append(self.readStorage.bytes.assumingMemoryBound(to: UInt8.self), count: bufSize)
+                    
+                    self.readStorage.replaceBytes(in: NSRange(location:0, length:bufSize), withBytes: nil, length: 0)
+                    return bufSize
+                    
+                } else {
+                    
+                    throw Error(bufferSize: self.readStorage.length)
+                }
+            }
+            
+            let returnCount = self.readStorage.length
+            
+            // - We've got data we've already read, copy to the caller's buffer...
+            //            memcpy(buffer, self.readStorage.bytes, self.readStorage.length)
+            buffer.append(self.readStorage.bytes.assumingMemoryBound(to: UInt8.self), count: self.readStorage.length)
+            // - Reset the storage buffer...
+            self.readStorage.length = 0
+            
+            return returnCount
+        }
+        
+        // Read all available bytes...
+        let count = try self.readDataIntoStorage()
+        
+        // Check for disconnect...
+        if count == 0 {
+            
+            return count
+        }
+        
+        // Did we get data?
+        var returnCount: Int = 0
+        if self.readStorage.length > 0 {
+            
+            // Is the caller's buffer big enough?
+            if bufSize < self.readStorage.length {
+                
+                // It isn't should we just use the available space?
+                if truncate {
+                    
+                    // Yep, copy what storage we can and remove the bytes from the internal buffer.
+                    //                    memcpy(buffer, self.readStorage.bytes, bufSize)
+                    buffer.append(self.readStorage.bytes.assumingMemoryBound(to: UInt8.self), count: bufSize)
+                    self.readStorage.replaceBytes(in: NSRange(location:0, length:bufSize), withBytes: nil, length: 0)
+                    return bufSize
+                    
+                } else {
+                    
+                    // Nope, throw an exception telling the caller how big the buffer must be...
+                    throw Error(bufferSize: self.readStorage.length)
+                }
+            }
+            
+            // - We've read data, copy to the callers buffer...
+            buffer.append(self.readStorage.bytes.assumingMemoryBound(to: UInt8.self), count: self.readStorage.length)
+            returnCount = self.readStorage.length
+            
+            // - Reset the storage buffer...
+            self.readStorage.length = 0
+        }
+        
+        return returnCount
+    }
 
 	///
 	/// Read a string from the socket
